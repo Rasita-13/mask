@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Teachable Machine + MQTT</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image"></script>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+</head>
+<body>
+  <h2>Teachable Machine + MQTT Example</h2>
+  <video id="webcam" autoplay playsinline width="200" height="200"></video>
+  <div id="label-container"></div>
+
+  <script>
+    const URL = "https://teachablemachine.withgoogle.com/models/A2LkaBTvm/"; // <-- ใส่ link โมเดลคุณ
+    let model, webcam, labelContainer, maxPredictions;
+
+    // MQTT setup
+    const client = mqtt.connect("wss://broker.emqx.io:8084/mqtt"); // ตัวอย่างฟรี broker
+    client.on("connect", () => {
+        console.log("MQTT Connected!");
+    });
+
+    async function init() {
+        const modelURL = URL + "model.json";
+        const metadataURL = URL + "metadata.json";
+
+        model = await tmImage.load(modelURL, metadataURL);
+        maxPredictions = model.getTotalClasses();
+
+        const flip = true; 
+        webcam = new tmImage.Webcam(200, 200, flip);
+        await webcam.setup();
+        await webcam.play();
+        window.requestAnimationFrame(loop);
+
+        document.getElementById("webcam").appendChild(webcam.canvas);
+        labelContainer = document.getElementById("label-container");
+        for (let i = 0; i < maxPredictions; i++) {
+            labelContainer.appendChild(document.createElement("div"));
+        }
+    }
+
+    async function loop() {
+        webcam.update();
+        await predict();
+        window.requestAnimationFrame(loop);
+    }
+
+    async function predict() {
+        const prediction = await model.predict(webcam.canvas);
+
+        let highestClass = "";
+        let highestProb = 0;
+        for (let i = 0; i < maxPredictions; i++) {
+            const classPrediction =
+                prediction[i].className + ": " + prediction[i].probability.toFixed(2);
+            labelContainer.childNodes[i].innerHTML = classPrediction;
+
+            if (prediction[i].probability > highestProb) {
+                highestProb = prediction[i].probability;
+                highestClass = prediction[i].className;
+            }
+        }
+
+        // ส่งข้อมูลไปที่ MQTT topic
+        if (highestProb > 0.8) { // ตั้ง threshold 
+            client.publish("teachable/result", highestClass);
+            console.log("Published:", highestClass);
+        }
+    }
+
+    init();
+  </script>
+</body>
+</html>
+
