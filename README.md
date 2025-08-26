@@ -11,7 +11,7 @@
   <button onclick="init()">Start</button>
 
   <script>
-    const modelURL = "https://teachablemachine.withgoogle.com/models/YOUR_MODEL_ID/"; // แก้ด้วย URL ของคุณ
+    const modelURL = "https://teachablemachine.withgoogle.com/models/A2LkaBTvm/"; // แก้ด้วย URL ของคุณ
     let model, webcam, prediction;
     let client;
 
