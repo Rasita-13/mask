@@ -1,95 +1,77 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <title>Teachable Machine + MQTT</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest"></script>
-  <script src="https://unpkg.com/paho-mqtt@1.1.0/mqttws31.min.js"></script>
+  <title>Teachable Machine Image Model (Mobile)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"> <!-- ทำ responsive -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
   <style>
     body {
       font-family: Arial, sans-serif;
-      background-color: #f4f6f9;
+      text-align: center;
       margin: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      min-height: 100vh;
+      padding: 0;
     }
-    header {
-      background: #007bff;
-      color: #fff;
-      width: 100%;
-      padding: 20px;
-      text-align: center;
-      font-size: 24px;
+    #webcam-container {
+      max-width: 100%;
+      margin: 10px auto;
     }
-    .container {
-      background: #fff;
-      margin-top: 20px;
-      padding: 20px;
-      border-radius: 8px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-      text-align: center;
-      width: 300px;
+    video {
+      max-width: 100%;
+      height: auto;
+    }
+    #label-container {
+      margin: 10px;
+      font-size: 1.2em;
     }
     button {
       padding: 10px 20px;
-      font-size: 16px;
-      border: none;
-      border-radius: 5px;
-      background: #28a745;
-      color: white;
-      cursor: pointer;
-    }
-    button:hover {
-      background: #218838;
-    }
-    #webcam-container {
-      margin-top: 15px;
-    }
-    #result {
-      margin-top: 10px;
-      font-size: 18px;
-      font-weight: bold;
-      color: #333;
-    }
-    .status {
-      margin-top: 8px;
-      font-size: 14px;
-      color: #666;
+      font-size: 1em;
+      margin: 5px;
     }
   </style>
 </head>
 <body>
-  <header>🤖 Teachable Machine + MQTT Dashboard</header>
-  <div class="container">
-    <button onclick="init()">Start Camera & Model</button>
-    <div id="webcam-container"></div>
-    <div id="result">Result will appear here...</div>
-    <div class="status" id="mqtt-status">MQTT: Not connected</div>
-  </div>
+  <div>Teachable Machine Image Model (Mobile)</div>
+  <button type="button" onclick="init('environment')">Start (Back Camera)</button>
+  <button type="button" onclick="init('user')">Start (Front Camera)</button>
+  <button type="button" onclick="stop()">Stop</button>
+  <div id="webcam-container"></div>
+  <div id="label-container"></div>
 
-  <script>
-    const modelBaseURL = "https://teachablemachine.withgoogle.com/models/A2LkaBTvm/";
-    let model, webcam, client;
+  <script type="text/javascript">
+    const URL = "https://teachablemachine.withgoogle.com/models/A2LkaBTvm/";
 
-    async function init() {
+    let model, webcam, labelContainer, maxPredictions;
+
+    async function init(facingMode) {
+      const modelURL = URL + "model.json";
+      const metadataURL = URL + "metadata.json";
+
+      model = await tmImage.load(modelURL, metadataURL);
+      maxPredictions = model.getTotalClasses();
+
+      // ตั้งค่า Webcam สำหรับมือถือ โดยระบุ facingMode
+      webcam = new tmImage.Webcam(224, 224, false); // ใช้ 224x224 เหมือนเดิม
       try {
-        const modelURL = modelBaseURL + "model.json";
-        const metadataURL = modelBaseURL + "metadata.json";
-        model = await tmImage.load(modelURL, metadataURL);
-
-        webcam = new tmImage.Webcam(300, 300, true);
-        await webcam.setup();
+        await webcam.setup({ facingMode: facingMode }); // เลือกกล้องหน้า (user) หรือหลัง (environment)
         await webcam.play();
-        document.getElementById("webcam-container").appendChild(webcam.canvas);
+        if (!webcam.canvas) {
+          throw new Error("Webcam canvas is not initialized");
+        }
+        console.log("Webcam initialized, width:", webcam.canvas.width, "facingMode:", facingMode);
         window.requestAnimationFrame(loop);
+      } catch (e) {
+        console.error("Webcam setup failed:", e);
+        document.getElementById("label-container").innerText = "Error: " + e.message;
+        return;
+      }
 
-        connectMQTT();
-      } catch (error) {
-        console.error("Error setting up webcam or model:", error);
-        alert("ไม่สามารถใช้กล้องหรือโหลดโมเดลได้ ตรวจสอบ HTTPS และสิทธิ์การเข้าถึงกล้อง");
+      document.getElementById("webcam-container").appendChild(webcam.canvas);
+      labelContainer = document.getElementById("label-container");
+      labelContainer.innerHTML = ""; // ล้างผลลัพธ์เก่า
+      for (let i = 0; i < maxPredictions; i++) {
+        labelContainer.appendChild(document.createElement("div"));
       }
     }
 
@@ -100,46 +82,18 @@
     }
 
     async function predict() {
-      const predictions = await model.predict(webcam.canvas);
-      let highest = predictions.reduce((a, b) => a.probability > b.probability ? a : b);
-
-      document.getElementById("result").innerText =
-        `Predicted: ${highest.className} (${(highest.probability * 100).toFixed(2)}%)`;
-
-      if (highest.probability > 0.8) {
-        sendMQTT(highest.className);
+      const prediction = await model.predict(webcam.canvas);
+      for (let i = 0; i < maxPredictions; i++) {
+        const classPrediction = prediction[i].className + ": " + prediction[i].probability.toFixed(2);
+        labelContainer.childNodes[i].innerHTML = classPrediction;
       }
     }
 
-    function connectMQTT() {
-      const broker = "broker.hivemq.com";
-      const port = 8000;
-      const clientId = "tmClient_" + Math.random().toString(16).substr(2, 8);
-
-      client = new Paho.MQTT.Client(broker, port, clientId);
-
-      client.onConnectionLost = (responseObject) => {
-        console.log("Connection lost:", responseObject.errorMessage);
-        document.getElementById("mqtt-status").innerText = "MQTT: Disconnected";
-        setTimeout(connectMQTT, 3000);
-      };
-
-      client.connect({
-        onSuccess: () => {
-          console.log("Connected to MQTT broker");
-          document.getElementById("mqtt-status").innerText = "MQTT: Connected ✅";
-        },
-        useSSL: location.protocol === "https:",
-      });
-    }
-
-    function sendMQTT(message) {
-      if (client && client.isConnected()) {
-        const topic = "tm/predict";
-        const msg = new Paho.MQTT.Message(message);
-        msg.destinationName = topic;
-        client.send(msg);
-        console.log("Sent MQTT:", message);
+    function stop() {
+      if (webcam) {
+        webcam.stop();
+        document.getElementById("webcam-container").innerHTML = '';
+        document.getElementById("label-container").innerHTML = '';
       }
     }
   </script>
