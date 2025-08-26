@@ -9,26 +9,34 @@
 <body>
   <h1>Teachable Machine + MQTT</h1>
   <button onclick="init()">Start</button>
+  <div id="webcam-container"></div>
+  <div id="result" style="margin-top:10px; font-size:18px; font-weight:bold;"></div>
 
   <script>
-    const modelURL = "https://teachablemachine.withgoogle.com/models/A2LkaBTvm/"; // แก้ด้วย URL ของคุณ
-    let model, webcam, prediction;
-    let client;
+    const modelURL = "https://teachablemachine.withgoogle.com/models/A2LkaBTvm/"; // เปลี่ยนเป็น URL ของคุณ
+    let model, webcam, client;
 
     async function init() {
-      const modelURL_full = modelURL + "model.json";
-      const metadataURL = modelURL + "metadata.json";
+      try {
+        const modelURL_full = modelURL + "model.json";
+        const metadataURL = modelURL + "metadata.json";
 
-      model = await tmImage.load(modelURL_full, metadataURL);
-      webcam = new tmImage.Webcam(200, 200, true); // width, height, flip
-      await webcam.setup();
-      await webcam.play();
-      window.requestAnimationFrame(loop);
+        model = await tmImage.load(modelURL_full, metadataURL);
 
-      // แสดง webcam
-      document.body.appendChild(webcam.canvas);
+        // สร้าง webcam object
+        webcam = new tmImage.Webcam(200, 200, true); 
+        await webcam.setup();  // ขอสิทธิ์กล้อง
+        await webcam.play();   // เริ่มเล่นกล้อง
+        window.requestAnimationFrame(loop);
 
-      connectMQTT();
+        // แสดง webcam บนหน้าเว็บ
+        document.getElementById("webcam-container").appendChild(webcam.canvas);
+
+        connectMQTT();
+      } catch (err) {
+        console.error("Webcam error: ", err);
+        alert("ไม่สามารถเข้าถึงกล้องได้! ตรวจสอบสิทธิ์การใช้งานกล้องและรันผ่าน HTTPS หรือ localhost");
+      }
     }
 
     async function loop() {
@@ -47,42 +55,40 @@
         }
       }
 
-      // ส่งเฉพาะ prediction ที่มีความมั่นใจมากกว่า 0.8
+      // แสดงผลบนหน้าเว็บ
+      document.getElementById("result").innerText = 
+        `Predicted: ${highest.className} (${(highest.probability*100).toFixed(2)}%)`;
+
+      // ส่ง MQTT ถ้ามั่นใจ > 0.8
       if (highest.probability > 0.8) {
-        console.log(`Predicted: ${highest.className}`);
         sendMQTT(highest.className);
       }
     }
 
     function connectMQTT() {
-      // เปลี่ยนตาม MQTT broker ของคุณ
       const broker = "broker.hivemq.com";
-      const port = 8000; // WebSocket port
+      const port = 8000; 
       const clientId = "tmClient_" + Math.random().toString(16).substr(2, 8);
 
       client = new Paho.MQTT.Client(broker, port, clientId);
 
       client.onConnectionLost = (responseObject) => {
         console.log("Connection lost: " + responseObject.errorMessage);
+        setTimeout(connectMQTT, 3000); // reconnect อัตโนมัติ
       };
 
       client.connect({
         onSuccess: () => {
           console.log("Connected to MQTT broker");
         },
-        useSSL: false,
+        useSSL: location.protocol === "https:",
       });
     }
 
     function sendMQTT(message) {
       if (client && client.isConnected()) {
-        const topic = "tm/predict"; // เปลี่ยน topic ตามต้องการ
+        const topic = "tm/predict"; 
         const payload = new Paho.MQTT.Message(message);
         payload.destinationName = topic;
         client.send(payload);
-        console.log(`Sent MQTT: ${message}`);
-      }
-    }
-  </script>
-</body>
-</html>
+        console.
